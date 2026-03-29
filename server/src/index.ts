@@ -40,27 +40,32 @@ function broadcastToGame(gameId: string, type: string, data: unknown): void {
 async function handleControllerResponse(response: Awaited<ReturnType<typeof router.handleMessage>>): Promise<void> {
   if (!response) return;
 
-  const { recipient, messageType, data, targetWs, gameId } = response;
+  const responses = Array.isArray(response) ? response : [response];
 
-  switch (recipient) {
-    case 'ws':
-      if (targetWs) send(targetWs, messageType, data);
-      break;
+  for (const res of responses) {
+    const { recipient, messageType, data, targetWs, gameId } = res;
 
-    case 'all_in_game':
-      if (gameId) broadcastToGame(gameId, messageType, data);
-      break;
+    switch (recipient) {
+      case 'ws':
+        if (targetWs) send(targetWs, messageType, data);
+        break;
 
-    case 'host':
-      if (gameId) {
-        const game = database.getGameById(gameId);
-        if (game) {
-          const hostUser = database.getUserByIndex(game.hostId);
-          if (hostUser?.ws) send(hostUser.ws, messageType, data);
+      case 'all_in_game':
+        if (gameId) broadcastToGame(gameId, messageType, data);
+        break;
+
+      case 'host':
+        if (gameId) {
+          const game = database.getGameById(gameId);
+          if (game) {
+            const hostUser = database.getUserByIndex(game.hostId);
+            if (hostUser?.ws) send(hostUser.ws, messageType, data);
+          }
         }
-      }
-      break;
+        break;
+    }
   }
+}
 
 
 const wss = new WebSocketServer({ port: PORT });

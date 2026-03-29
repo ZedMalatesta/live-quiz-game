@@ -2,7 +2,9 @@ import type { WebSocket } from 'ws';
 import type {
   RegData,
   CreateGameData,
+  JoinGameData,
   User,
+  Player,
 } from '../types/types.js';
 import { GameDatabase } from '../db/db.js';
 
@@ -19,6 +21,7 @@ export interface ControllerResponse {
 export class GameController {
   private db: GameDatabase;
   private wsToUser: WeakMap<WebSocket, User>;
+  private userToGame: Map<string, string> = new Map();
 
   constructor(database: GameDatabase) {
     this.db = database;
@@ -72,6 +75,19 @@ export class GameController {
       console.log(`Disconnected: ${user.name}`);
       user.ws = undefined;
       this.wsToUser.delete(ws);
+
+      const gameId = this.userToGame.get(user.index);
+      if (gameId) {
+        const game = this.db.getGameById(gameId);
+        if (game) {
+          const playerIndex = game.players.findIndex((p) => p.index === user.index);
+          if (playerIndex > -1) {
+            game.players.splice(playerIndex, 1);
+            console.log(`Player removed from game: ${user.name}`);
+          }
+        }
+        this.userToGame.delete(user.index);
+      }
     }
   }
 
@@ -125,6 +141,88 @@ export class GameController {
       messageType: 'game_created',
       data: { gameId: game.id, code: game.code },
     };
+  }
+
+  handleJoinGame(ws: WebSocket, data: JoinGameData): ControllerResponse[] {
+    const user = this.getUserByWs(ws);
+    if (!user) {
+      return [
+        {
+          type: 'error',
+          recipient: 'ws',
+          targetWs: ws,
+          messageType: 'error',
+          data: { message: 'Not authenticated. Please register first.' },
+        },
+      ];
+    }
+
+    const { code } = data;
+    if (!code || typeof code !== 'string') {
+      return [
+        {
+          type: 'error',
+          recipient: 'ws',
+          targetWs: ws,
+          messageType: 'error',
+          data: { message: 'Invalid game code.' },
+        },
+      ];
+    }
+
+    const game = this.db.getGameByCode(code);
+    if (!game) {
+      return [
+        {
+          type: 'error',
+          recipient: 'ws',
+          targetWs: ws,
+          messageType: 'error',
+          data: { message: 'Game not found.' },
+        },
+      ];
+    }
+
+    const player: Player = {
+      name: user.name,
+      index: user.index,
+      score: 0,
+      ws: user.ws,
+    };
+
+    game.players.push(player);
+    this.userToGame.set(user.index, game.id);
+    console.log(`Player joined — name: ${user.name}, game: ${game.code}, total players: ${game.players.length}`);
+
+    const responses: ControllerResponse[] = [
+      {
+        type: 'game',
+        recipient: 'ws',
+        targetWs: ws,
+        messageType: 'game_joined',
+        data: { gameId: game.id },
+      },
+      {
+        type: 'broadcast',
+        recipient: 'all_in_game',
+        gameId: game.id,
+        messageType: 'player_joined',
+        data: { playerName: player.name, playerCount: game.players.length },
+      },
+      {
+        type: 'broadcast',
+        recipient: 'all_in_game',
+        gameId: game.id,
+        messageType: 'update_players',
+        data: game.players.map((p) => ({
+          name: p.name,
+          index: p.index,
+          score: p.score,
+        })),
+      },
+    ];
+
+    return responses;
   }
 
   getDatabase(): GameDatabase {
