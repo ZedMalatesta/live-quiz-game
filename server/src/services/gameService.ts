@@ -50,6 +50,11 @@ export class GameService {
       throw new Error('Game not found.');
     }
 
+    const existingPlayer = game.players.find((p) => p.index === user.index);
+    if (existingPlayer) {
+      throw new Error('Player already in this game.');
+    }
+
     const player: Player = {
       name: user.name,
       index: user.index,
