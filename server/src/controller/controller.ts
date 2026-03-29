@@ -217,7 +217,7 @@ export class GameController {
     game.questionStartTime = Date.now();
 
     const question = game.questions[0];
-    console.log(`Game started — id: ${game.id}, total players: ${game.players.length}`);
+    console.log(`Game ${game.code} started`);
 
     this.gameplayService.startQuestionTimer(gameId);
 
@@ -262,7 +262,7 @@ export class GameController {
     }
 
     this.gameplayService.recordAnswer(user.index, data, gameId);
-    console.log(`Answer received — player: ${user.name}, question: ${questionIndex}, answer: ${data.answerIndex}`);
+    console.log(`${user.name} answered question ${questionIndex + 1}`);
 
     const responses: ControllerResponse[] = [
       {
@@ -275,7 +275,7 @@ export class GameController {
     ];
 
     if (this.gameplayService.allPlayersAnswered(gameId)) {
-      console.log(`All players answered — ending question early for game: ${gameId}`);
+      console.log(`All players answered, finishing question`);
       const gameResponses = this.gameplayService.endQuestion(gameId);
       responses.push(
         ...gameResponses.map((r) => ({

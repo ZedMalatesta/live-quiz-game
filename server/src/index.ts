@@ -67,16 +67,11 @@ async function handleControllerResponse(response: Awaited<ReturnType<typeof rout
   }
 }
 
-// Initialize the controller with broadcast function
 controller.setBroadcastFunction(broadcastToGame);
-
 
 const wss = new WebSocketServer({ port: PORT });
 
-console.log(`WebSocket server running on ws://localhost:${PORT}`);
-
 wss.on('connection', (ws: WebSocket) => {
-  console.log('Client connected');
 
   ws.on('message', async (raw) => {
     try {

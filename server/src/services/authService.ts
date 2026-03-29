@@ -22,13 +22,12 @@ export class AuthService {
       }
       existing.ws = ws;
       this.wsToUser.set(ws, existing);
-      console.log(`Re-login: ${existing.name}`);
       return { name: existing.name, index: existing.index, error: false, errorText: '' };
     } else {
       const user = this.db.createUser(name, password);
       user.ws = ws;
       this.wsToUser.set(ws, user);
-      console.log(`Registered: ${user.name} (index: ${user.index})`);
+      console.log(`User registered: ${user.name}`);
       return { name: user.name, index: user.index, error: false, errorText: '' };
     }
   }
@@ -40,7 +39,6 @@ export class AuthService {
   handleDisconnect(ws: WebSocket, userToGame: Map<string, string>): void {
     const user = this.wsToUser.get(ws);
     if (user) {
-      console.log(`Disconnected: ${user.name}`);
       user.ws = undefined;
       this.wsToUser.delete(ws);
 
@@ -51,7 +49,7 @@ export class AuthService {
           const playerIndex = game.players.findIndex((p) => p.index === user.index);
           if (playerIndex > -1) {
             game.players.splice(playerIndex, 1);
-            console.log(`Player removed from game: ${user.name}`);
+
           }
         }
         userToGame.delete(user.index);

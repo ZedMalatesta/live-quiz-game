@@ -99,7 +99,7 @@ export class GameplayService {
       game.questionTimer = undefined;
     }
 
-    console.log(`Question ${game.currentQuestion} ended — game: ${gameId}`);
+    console.log(`Question ${game.currentQuestion + 1} finished`);
   }
 
   calculatePlayerResults(gameId: string): PlayerResult[] {
@@ -134,7 +134,7 @@ export class GameplayService {
     const question = game.questions[game.currentQuestion];
     const playerResults = this.calculatePlayerResults(gameId);
 
-    console.log(`Question result — game: ${gameId}, question: ${game.currentQuestion}`);
+    console.log(`Results for question ${game.currentQuestion + 1}`);
 
     return {
       type: 'broadcast',
@@ -207,7 +207,7 @@ export class GameplayService {
       rank: index + 1,
     }));
 
-    console.log(`Game finished — id: ${gameId}, total players: ${game.players.length}`);
+    console.log(`Game finished. ${game.players.length} players completed`);
 
     return {
       type: 'broadcast',

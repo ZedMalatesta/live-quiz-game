@@ -40,7 +40,7 @@ export class GameService {
 
   createGame(user: User, data: CreateGameData): CreateGameResponse {
     const game = this.db.createGame(user.index, data.questions);
-    console.log(`Game created — code: ${game.code}, host: ${user.name}, questions: ${data.questions.length}`);
+    console.log(`Game created: ${game.code} by ${user.name}`);
     return { gameId: game.id, code: game.code };
   }
 
@@ -58,7 +58,7 @@ export class GameService {
     };
 
     game.players.push(player);
-    console.log(`Player joined — name: ${user.name}, game: ${game.code}, total players: ${game.players.length}`);
+    console.log(`${user.name} joined game ${code}`);
 
     return { game, player };
   }

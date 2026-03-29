@@ -11,7 +11,6 @@ export class MessageRouter {
 
   async handleMessage(ws: WebSocket, message: WSMessage): Promise<ControllerResponse | ControllerResponse[] | null> {
     const { type, data } = message;
-    console.log(`→ [${type}]`, data);
 
     switch (type) {
       case 'reg':
@@ -30,7 +29,6 @@ export class MessageRouter {
         return this.controller.handleAnswer(ws, data as AnswerData);
 
       default:
-        console.log(`Unhandled message type: ${type}`);
         return null;
     }
   }
