@@ -29,6 +29,7 @@ export class GameController {
   private authService: AuthService;
   private gameService: GameService;
   private gameplayService: GameplayService;
+  private broadcastFunction: BroadcastFn | null = null;
 
   constructor(database: GameDatabase) {
     this.db = database;
@@ -39,6 +40,7 @@ export class GameController {
   }
 
   setBroadcastFunction(fn: BroadcastFn): void {
+    this.broadcastFunction = fn;
     this.gameplayService.setBroadcastFunction(fn);
   }
   handleReg(ws: WebSocket, data: RegData): ControllerResponse {
@@ -234,7 +236,7 @@ export class GameController {
     };
   }
 
-  handleAnswer(ws: WebSocket, data: AnswerData): ControllerResponse {
+  handleAnswer(ws: WebSocket, data: AnswerData): ControllerResponse | ControllerResponse[] {
     const user = this.getUserByWs(ws);
     if (!user) {
       return {
@@ -262,39 +264,31 @@ export class GameController {
     this.gameplayService.recordAnswer(user.index, data, gameId);
     console.log(`Answer received — player: ${user.name}, question: ${questionIndex}, answer: ${data.answerIndex}`);
 
+    const responses: ControllerResponse[] = [
+      {
+        type: 'user',
+        recipient: 'ws',
+        targetWs: ws,
+        messageType: 'answer_accepted',
+        data: { questionIndex },
+      },
+    ];
+
     if (this.gameplayService.allPlayersAnswered(gameId)) {
       console.log(`All players answered — ending question early for game: ${gameId}`);
-      this.gameplayService.endQuestion(gameId);
+      const gameResponses = this.gameplayService.endQuestion(gameId);
+      responses.push(
+        ...gameResponses.map((r) => ({
+          type: 'broadcast' as const,
+          recipient: 'all_in_game' as const,
+          gameId,
+          messageType: r.messageType,
+          data: r.data,
+        }))
+      );
     }
 
-    return {
-      type: 'user',
-      recipient: 'ws',
-      targetWs: ws,
-      messageType: 'answer_accepted',
-      data: { questionIndex },
-    };
-  }
-
-  broadcastQuestionResult(gameId: string): ControllerResponse {
-    const result = this.gameplayService.broadcastQuestionResult(gameId);
-
-    if (!result) {
-      return {
-        type: 'error',
-        recipient: 'ws',
-        messageType: 'error',
-        data: { message: 'Game not found.' },
-      };
-    }
-
-    return {
-      type: 'broadcast',
-      recipient: 'all_in_game',
-      gameId,
-      messageType: 'question_result',
-      data: result,
-    };
+    return responses;
   }
 
   getDatabase(): GameDatabase {

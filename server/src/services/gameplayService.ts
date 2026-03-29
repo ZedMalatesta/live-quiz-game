@@ -16,10 +16,20 @@ export interface QuestionResultData {
   playerResults: PlayerResult[];
 }
 
+export interface GameResponse {
+  type: 'broadcast';
+  gameId: string;
+  messageType: string;
+  data: unknown;
+}
+
 export type BroadcastFn = (gameId: string, type: string, data: unknown) => void;
 
 export class GameplayService {
-  constructor(private db: GameDatabase, private broadcastFunction: BroadcastFn | null = null) {}
+  private questionTimers: Map<string, NodeJS.Timeout> = new Map();
+  private broadcastFunction: BroadcastFn | null = null;
+
+  constructor(private db: GameDatabase) {}
 
   setBroadcastFunction(fn: BroadcastFn): void {
     this.broadcastFunction = fn;
@@ -68,13 +78,29 @@ export class GameplayService {
     const question = game.questions[game.currentQuestion];
     if (!question) return;
 
-    if (game.questionTimer) {
-      clearTimeout(game.questionTimer);
+    const existingTimer = this.questionTimers.get(gameId);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
     }
 
-    game.questionTimer = setTimeout(() => {
-      this.endQuestion(gameId);
+    const timer = setTimeout(() => {
+      this.endQuestionTimeout(gameId);
     }, question.timeLimitSec * 1000);
+
+    this.questionTimers.set(gameId, timer);
+  }
+
+  private endQuestionTimeout(gameId: string): void {
+    const game = this.db.getGameById(gameId);
+    if (!game || game.status !== 'in_progress') return;
+
+    if (game.questionTimer) {
+      clearTimeout(game.questionTimer);
+      game.questionTimer = undefined;
+    }
+
+    console.log(`Question ${game.currentQuestion} ended — game: ${gameId}`);
+    game.currentQuestion++;
   }
 
   calculatePlayerResults(gameId: string): PlayerResult[] {
@@ -102,7 +128,7 @@ export class GameplayService {
     });
   }
 
-  broadcastQuestionResult(gameId: string): QuestionResultData | null {
+  broadcastQuestionResult(gameId: string): GameResponse | null {
     const game = this.db.getGameById(gameId);
     if (!game) return null;
 
@@ -111,36 +137,37 @@ export class GameplayService {
 
     console.log(`Question result — game: ${gameId}, question: ${game.currentQuestion}`);
 
-    if (this.broadcastFunction) {
-      this.broadcastFunction(gameId, 'question_result', {
+    return {
+      type: 'broadcast',
+      gameId,
+      messageType: 'question_result',
+      data: {
         questionIndex: game.currentQuestion,
         correctIndex: question.correctIndex,
         playerResults,
-      });
-    }
-
-    return {
-      questionIndex: game.currentQuestion,
-      correctIndex: question.correctIndex,
-      playerResults,
+      },
     };
   }
 
-  endQuestion(gameId: string): void {
+  endQuestion(gameId: string): GameResponse[] {
     const game = this.db.getGameById(gameId);
-    if (!game || game.status !== 'in_progress' || !this.broadcastFunction) return;
+    if (!game || game.status !== 'in_progress') return [];
 
     if (game.questionTimer) {
       clearTimeout(game.questionTimer);
       game.questionTimer = undefined;
     }
 
-    console.log(`Question ${game.currentQuestion} ended — game: ${gameId}`);
+    this.endQuestionTimeout(gameId);
 
-    this.broadcastQuestionResult(gameId);
-    game.currentQuestion++;
+    const responses: GameResponse[] = [];
 
-    if (game.currentQuestion < game.questions.length) {
+    const resultResponse = this.broadcastQuestionResult(gameId);
+    if (resultResponse) {
+      responses.push(resultResponse);
+    }
+
+    if (game.currentQuestion < game.questions.length && this.broadcastFunction) {
       setTimeout(() => {
         game.questionStartTime = Date.now();
         game.playerAnswers.clear();
@@ -158,5 +185,7 @@ export class GameplayService {
         }
       }, 2000);
     }
+
+    return responses;
   }
 }
