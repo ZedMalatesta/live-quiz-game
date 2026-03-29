@@ -3,6 +3,7 @@ import type {
   RegData,
   CreateGameData,
   JoinGameData,
+  StartGameData,
   User,
   Player,
 } from '../types/types.js';
@@ -223,6 +224,73 @@ export class GameController {
     ];
 
     return responses;
+  }
+
+  handleStartGame(ws: WebSocket, data: StartGameData): ControllerResponse {
+    const user = this.getUserByWs(ws);
+    if (!user) {
+      return {
+        type: 'error',
+        recipient: 'ws',
+        targetWs: ws,
+        messageType: 'error',
+        data: { message: 'Not authenticated.' },
+      };
+    }
+
+    const { gameId } = data;
+    const game = this.db.getGameById(gameId);
+
+    if (!game) {
+      return {
+        type: 'error',
+        recipient: 'ws',
+        targetWs: ws,
+        messageType: 'error',
+        data: { message: 'Game not found.' },
+      };
+    }
+
+    if (game.hostId !== user.index) {
+      return {
+        type: 'error',
+        recipient: 'ws',
+        targetWs: ws,
+        messageType: 'error',
+        data: { message: 'Only host can start the game.' },
+      };
+    }
+
+    if (game.status !== 'waiting') {
+      return {
+        type: 'error',
+        recipient: 'ws',
+        targetWs: ws,
+        messageType: 'error',
+        data: { message: 'Game has already started.' },
+      };
+    }
+
+    game.status = 'in_progress';
+    game.currentQuestion = 0;
+    game.questionStartTime = Date.now();
+
+    const question = game.questions[0];
+    console.log(`Game started — id: ${game.id}, total players: ${game.players.length}`);
+
+    return {
+      type: 'broadcast',
+      recipient: 'all_in_game',
+      gameId: game.id,
+      messageType: 'question',
+      data: {
+        questionNumber: 1,
+        totalQuestions: game.questions.length,
+        text: question.text,
+        options: question.options,
+        timeLimitSec: question.timeLimitSec,
+      },
+    };
   }
 
   getDatabase(): GameDatabase {

@@ -1,5 +1,5 @@
 import type { WebSocket } from 'ws';
-import type { WSMessage, RegData, CreateGameData, JoinGameData } from '../types/types.js';
+import type { WSMessage, RegData, CreateGameData, JoinGameData, StartGameData } from '../types/types.js';
 import { GameController, type ControllerResponse } from '../controller/controller.js';
 
 export class MessageRouter {
@@ -22,6 +22,9 @@ export class MessageRouter {
 
       case 'join_game':
         return this.controller.handleJoinGame(ws, data as JoinGameData);
+
+      case 'start_game':
+        return this.controller.handleStartGame(ws, data as StartGameData);
 
       default:
         console.log(`Unhandled message type: ${type}`);

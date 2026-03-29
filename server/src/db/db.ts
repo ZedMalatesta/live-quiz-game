@@ -1,15 +1,11 @@
 import { createHash, randomBytes } from 'crypto';
 import type { User, Game, Question } from '../types/types.js';
 
-/**
- * Database layer - manages all data operations for users and games
- */
 export class GameDatabase {
   private users: User[] = [];
   private games: Game[] = [];
   private userIndex: number = 1;
 
-  // ─── User operations ──────────────────────────────────────────────────
 
   getUserByName(name: string): User | undefined {
     return this.users.find((u) => u.name === name);
@@ -33,10 +29,7 @@ export class GameDatabase {
     return user;
   }
 
-  // ─── Game operations ──────────────────────────────────────────────────
-
   private generateCode(): string {
-    // 6 uppercase hex characters e.g. "A3F9C1"
     return randomBytes(3).toString('hex').toUpperCase();
   }
 
@@ -75,8 +68,6 @@ export class GameDatabase {
     const idx = this.games.findIndex((g) => g.id === id);
     if (idx > -1) this.games.splice(idx, 1);
   }
-
-  // ─── Utility ──────────────────────────────────────────────────────────
 
   private hashPassword(password: string): string {
     return createHash('sha256').update(password).digest('hex');
