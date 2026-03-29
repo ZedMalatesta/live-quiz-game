@@ -67,6 +67,9 @@ async function handleControllerResponse(response: Awaited<ReturnType<typeof rout
   }
 }
 
+// Initialize the controller with broadcast function
+controller.setBroadcastFunction(broadcastToGame);
+
 
 const wss = new WebSocketServer({ port: PORT });
 

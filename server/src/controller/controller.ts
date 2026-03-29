@@ -6,10 +6,11 @@ import type {
   StartGameData,
   AnswerData,
   User,
-  Player,
 } from '../types/types.js';
 import { GameDatabase } from '../db/db.js';
-import { calculateScore } from '../utils/scoring.js';
+import { AuthService } from '../services/authService.js';
+import { GameService } from '../services/gameService.js';
+import { GameplayService, type BroadcastFn } from '../services/gameplayService.js';
 
 export interface ControllerResponse {
   type: 'user' | 'game' | 'broadcast' | 'error';
@@ -25,73 +26,39 @@ export class GameController {
   private db: GameDatabase;
   private wsToUser: WeakMap<WebSocket, User>;
   private userToGame: Map<string, string> = new Map();
+  private authService: AuthService;
+  private gameService: GameService;
+  private gameplayService: GameplayService;
 
   constructor(database: GameDatabase) {
     this.db = database;
     this.wsToUser = new WeakMap<WebSocket, User>();
+    this.authService = new AuthService(database, this.wsToUser);
+    this.gameService = new GameService(database);
+    this.gameplayService = new GameplayService(database);
+  }
+
+  setBroadcastFunction(fn: BroadcastFn): void {
+    this.gameplayService.setBroadcastFunction(fn);
   }
   handleReg(ws: WebSocket, data: RegData): ControllerResponse {
-    const { name, password } = data;
-    const existing = this.db.getUserByName(name);
+    const regResponse = this.authService.handleReg(ws, data);
 
-    if (existing) {
-      if (!this.db.verifyPassword(existing.password, password)) {
-        return {
-          type: 'user',
-          recipient: 'ws',
-          targetWs: ws,
-          messageType: 'reg',
-          data: { name: '', index: '', error: true, errorText: 'Wrong password' },
-        };
-      }
-      existing.ws = ws;
-      this.wsToUser.set(ws, existing);
-      console.log(`Re-login: ${existing.name}`);
-      return {
-        type: 'user',
-        recipient: 'ws',
-        targetWs: ws,
-        messageType: 'reg',
-        data: { name: existing.name, index: existing.index, error: false, errorText: '' },
-      };
-    } else {
-      const user = this.db.createUser(name, password);
-      user.ws = ws;
-      this.wsToUser.set(ws, user);
-      console.log(`Registered: ${user.name} (index: ${user.index})`);
-      return {
-        type: 'user',
-        recipient: 'ws',
-        targetWs: ws,
-        messageType: 'reg',
-        data: { name: user.name, index: user.index, error: false, errorText: '' },
-      };
-    }
+    return {
+      type: 'user',
+      recipient: 'ws',
+      targetWs: ws,
+      messageType: 'reg',
+      data: regResponse,
+    };
   }
 
   getUserByWs(ws: WebSocket): User | undefined {
-    return this.wsToUser.get(ws);
+    return this.authService.getUserByWs(ws);
   }
-  handleDisconnect(ws: WebSocket): void {
-    const user = this.wsToUser.get(ws);
-    if (user) {
-      console.log(`Disconnected: ${user.name}`);
-      user.ws = undefined;
-      this.wsToUser.delete(ws);
 
-      const gameId = this.userToGame.get(user.index);
-      if (gameId) {
-        const game = this.db.getGameById(gameId);
-        if (game) {
-          const playerIndex = game.players.findIndex((p) => p.index === user.index);
-          if (playerIndex > -1) {
-            game.players.splice(playerIndex, 1);
-            console.log(`Player removed from game: ${user.name}`);
-          }
-        }
-        this.userToGame.delete(user.index);
-      }
-    }
+  handleDisconnect(ws: WebSocket): void {
+    this.authService.handleDisconnect(ws, this.userToGame);
   }
 
   handleCreateGame(ws: WebSocket, data: CreateGameData): ControllerResponse | null {
@@ -106,43 +73,24 @@ export class GameController {
       };
     }
 
-    const { questions } = data;
-    if (!Array.isArray(questions) || questions.length === 0) {
+    const validationError = this.gameService.validateCreateGameData(data);
+    if (validationError) {
       return {
         type: 'error',
         recipient: 'ws',
         targetWs: ws,
         messageType: 'error',
-        data: { message: 'At least one question is required.' },
+        data: { message: validationError },
       };
     }
 
-    for (const q of questions) {
-      if (
-        typeof q.text !== 'string' ||
-        !Array.isArray(q.options) ||
-        q.options.length !== 4 ||
-        typeof q.correctIndex !== 'number' ||
-        typeof q.timeLimitSec !== 'number'
-      ) {
-        return {
-          type: 'error',
-          recipient: 'ws',
-          targetWs: ws,
-          messageType: 'error',
-          data: { message: 'Invalid question format.' },
-        };
-      }
-    }
-
-    const game = this.db.createGame(user.index, questions);
-    console.log(`Game created — code: ${game.code}, host: ${user.name}, questions: ${questions.length}`);
+    const gameResponse = this.gameService.createGame(user, data);
     return {
       type: 'game',
       recipient: 'ws',
       targetWs: ws,
       messageType: 'game_created',
-      data: { gameId: game.id, code: game.code },
+      data: gameResponse,
     };
   }
 
@@ -173,59 +121,48 @@ export class GameController {
       ];
     }
 
-    const game = this.db.getGameByCode(code);
-    if (!game) {
+    try {
+      const { game, player } = this.gameService.joinGame(user, code);
+      this.userToGame.set(user.index, game.id);
+
+      const playersList = this.gameService.getPlayersList(game.id);
+
+      const responses: ControllerResponse[] = [
+        {
+          type: 'game',
+          recipient: 'ws',
+          targetWs: ws,
+          messageType: 'game_joined',
+          data: { gameId: game.id },
+        },
+        {
+          type: 'broadcast',
+          recipient: 'all_in_game',
+          gameId: game.id,
+          messageType: 'player_joined',
+          data: { playerName: player.name, playerCount: game.players.length },
+        },
+        {
+          type: 'broadcast',
+          recipient: 'all_in_game',
+          gameId: game.id,
+          messageType: 'update_players',
+          data: playersList,
+        },
+      ];
+
+      return responses;
+    } catch (error) {
       return [
         {
           type: 'error',
           recipient: 'ws',
           targetWs: ws,
           messageType: 'error',
-          data: { message: 'Game not found.' },
+          data: { message: (error as Error).message },
         },
       ];
     }
-
-    const player: Player = {
-      name: user.name,
-      index: user.index,
-      score: 0,
-      ws: user.ws,
-    };
-
-    game.players.push(player);
-    this.userToGame.set(user.index, game.id);
-    console.log(`Player joined — name: ${user.name}, game: ${game.code}, total players: ${game.players.length}`);
-
-    const responses: ControllerResponse[] = [
-      {
-        type: 'game',
-        recipient: 'ws',
-        targetWs: ws,
-        messageType: 'game_joined',
-        data: { gameId: game.id },
-      },
-      {
-        type: 'broadcast',
-        recipient: 'all_in_game',
-        gameId: game.id,
-        messageType: 'player_joined',
-        data: { playerName: player.name, playerCount: game.players.length },
-      },
-      {
-        type: 'broadcast',
-        recipient: 'all_in_game',
-        gameId: game.id,
-        messageType: 'update_players',
-        data: game.players.map((p) => ({
-          name: p.name,
-          index: p.index,
-          score: p.score,
-        })),
-      },
-    ];
-
-    return responses;
   }
 
   handleStartGame(ws: WebSocket, data: StartGameData): ControllerResponse {
@@ -280,6 +217,8 @@ export class GameController {
     const question = game.questions[0];
     console.log(`Game started — id: ${game.id}, total players: ${game.players.length}`);
 
+    this.gameplayService.startQuestionTimer(gameId);
+
     return {
       type: 'broadcast',
       recipient: 'all_in_game',
@@ -307,53 +246,26 @@ export class GameController {
       };
     }
 
-    const { gameId, questionIndex, answerIndex } = data;
-    const game = this.db.getGameById(gameId);
+    const { gameId, questionIndex } = data;
+    const validation = this.gameplayService.validateAnswer(data, gameId);
 
-    if (!game) {
+    if (!validation.valid) {
       return {
         type: 'error',
         recipient: 'ws',
         targetWs: ws,
         messageType: 'error',
-        data: { message: 'Game not found.' },
+        data: { message: validation.error },
       };
     }
 
-    if (questionIndex !== game.currentQuestion) {
-      return {
-        type: 'error',
-        recipient: 'ws',
-        targetWs: ws,
-        messageType: 'error',
-        data: { message: 'Invalid question index.' },
-      };
-    }
+    this.gameplayService.recordAnswer(user.index, data, gameId);
+    console.log(`Answer received — player: ${user.name}, question: ${questionIndex}, answer: ${data.answerIndex}`);
 
-    const question = game.questions[questionIndex];
-    if (!question) {
-      return {
-        type: 'error',
-        recipient: 'ws',
-        targetWs: ws,
-        messageType: 'error',
-        data: { message: 'Question not found.' },
-      };
+    if (this.gameplayService.allPlayersAnswered(gameId)) {
+      console.log(`All players answered — ending question early for game: ${gameId}`);
+      this.gameplayService.endQuestion(gameId);
     }
-
-    if (typeof answerIndex !== 'number' || answerIndex < 0 || answerIndex > 3) {
-      return {
-        type: 'error',
-        recipient: 'ws',
-        targetWs: ws,
-        messageType: 'error',
-        data: { message: 'Invalid answer index.' },
-      };
-    }
-
-    const timestamp = Date.now() - (game.questionStartTime || Date.now());
-    game.playerAnswers.set(user.index, { answerIndex, timestamp });
-    console.log(`Answer received — player: ${user.name}, question: ${questionIndex}, answer: ${answerIndex}`);
 
     return {
       type: 'user',
@@ -365,8 +277,9 @@ export class GameController {
   }
 
   broadcastQuestionResult(gameId: string): ControllerResponse {
-    const game = this.db.getGameById(gameId);
-    if (!game) {
+    const result = this.gameplayService.broadcastQuestionResult(gameId);
+
+    if (!result) {
       return {
         type: 'error',
         recipient: 'ws',
@@ -375,38 +288,12 @@ export class GameController {
       };
     }
 
-    const question = game.questions[game.currentQuestion];
-    const playerResults = game.players.map((player) => {
-      const playerAnswer = game.playerAnswers.get(player.index);
-      const answered = playerAnswer !== undefined;
-      const correct = answered && playerAnswer.answerIndex === question.correctIndex;
-      const pointsEarned = correct ? calculateScore(true, playerAnswer!.timestamp, question.timeLimitSec) : 0;
-      
-      if (correct) {
-        player.score += pointsEarned;
-      }
-
-      return {
-        name: player.name,
-        answered,
-        correct,
-        pointsEarned,
-        totalScore: player.score,
-      };
-    });
-
-    console.log(`Question result \u2014 game: ${gameId}, question: ${game.currentQuestion}`);
-
     return {
       type: 'broadcast',
       recipient: 'all_in_game',
-      gameId: game.id,
+      gameId,
       messageType: 'question_result',
-      data: {
-        questionIndex: game.currentQuestion,
-        correctIndex: question.correctIndex,
-        playerResults,
-      },
+      data: result,
     };
   }
 
