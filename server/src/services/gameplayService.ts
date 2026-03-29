@@ -100,7 +100,6 @@ export class GameplayService {
     }
 
     console.log(`Question ${game.currentQuestion} ended — game: ${gameId}`);
-    game.currentQuestion++;
   }
 
   calculatePlayerResults(gameId: string): PlayerResult[] {
@@ -167,6 +166,8 @@ export class GameplayService {
       responses.push(resultResponse);
     }
 
+    game.currentQuestion++;
+
     if (game.currentQuestion < game.questions.length && this.broadcastFunction) {
       setTimeout(() => {
         game.questionStartTime = Date.now();
@@ -184,8 +185,35 @@ export class GameplayService {
           });
         }
       }, 2000);
+    } else {
+      game.status = 'finished';
+      const finishedResponse = this.broadcastGameFinished(gameId);
+      if (finishedResponse) {
+        responses.push(finishedResponse);
+      }
     }
 
     return responses;
+  }
+
+  private broadcastGameFinished(gameId: string): GameResponse | null {
+    const game = this.db.getGameById(gameId);
+    if (!game) return null;
+
+    const sortedPlayers = [...game.players].sort((a, b) => b.score - a.score);
+    const scoreboard = sortedPlayers.map((player, index) => ({
+      name: player.name,
+      score: player.score,
+      rank: index + 1,
+    }));
+
+    console.log(`Game finished — id: ${gameId}, total players: ${game.players.length}`);
+
+    return {
+      type: 'broadcast',
+      gameId,
+      messageType: 'game_finished',
+      data: { scoreboard },
+    };
   }
 }
