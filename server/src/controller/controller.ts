@@ -9,6 +9,7 @@ import type {
   Player,
 } from '../types/types.js';
 import { GameDatabase } from '../db/db.js';
+import { calculateScore } from '../utils/scoring.js';
 
 export interface ControllerResponse {
   type: 'user' | 'game' | 'broadcast' | 'error';
@@ -360,6 +361,52 @@ export class GameController {
       targetWs: ws,
       messageType: 'answer_accepted',
       data: { questionIndex },
+    };
+  }
+
+  broadcastQuestionResult(gameId: string): ControllerResponse {
+    const game = this.db.getGameById(gameId);
+    if (!game) {
+      return {
+        type: 'error',
+        recipient: 'ws',
+        messageType: 'error',
+        data: { message: 'Game not found.' },
+      };
+    }
+
+    const question = game.questions[game.currentQuestion];
+    const playerResults = game.players.map((player) => {
+      const playerAnswer = game.playerAnswers.get(player.index);
+      const answered = playerAnswer !== undefined;
+      const correct = answered && playerAnswer.answerIndex === question.correctIndex;
+      const pointsEarned = correct ? calculateScore(true, playerAnswer!.timestamp, question.timeLimitSec) : 0;
+      
+      if (correct) {
+        player.score += pointsEarned;
+      }
+
+      return {
+        name: player.name,
+        answered,
+        correct,
+        pointsEarned,
+        totalScore: player.score,
+      };
+    });
+
+    console.log(`Question result \u2014 game: ${gameId}, question: ${game.currentQuestion}`);
+
+    return {
+      type: 'broadcast',
+      recipient: 'all_in_game',
+      gameId: game.id,
+      messageType: 'question_result',
+      data: {
+        questionIndex: game.currentQuestion,
+        correctIndex: question.correctIndex,
+        playerResults,
+      },
     };
   }
 
