@@ -4,6 +4,7 @@ import type {
   CreateGameData,
   JoinGameData,
   StartGameData,
+  AnswerData,
   User,
   Player,
 } from '../types/types.js';
@@ -290,6 +291,75 @@ export class GameController {
         options: question.options,
         timeLimitSec: question.timeLimitSec,
       },
+    };
+  }
+
+  handleAnswer(ws: WebSocket, data: AnswerData): ControllerResponse {
+    const user = this.getUserByWs(ws);
+    if (!user) {
+      return {
+        type: 'error',
+        recipient: 'ws',
+        targetWs: ws,
+        messageType: 'error',
+        data: { message: 'Not authenticated.' },
+      };
+    }
+
+    const { gameId, questionIndex, answerIndex } = data;
+    const game = this.db.getGameById(gameId);
+
+    if (!game) {
+      return {
+        type: 'error',
+        recipient: 'ws',
+        targetWs: ws,
+        messageType: 'error',
+        data: { message: 'Game not found.' },
+      };
+    }
+
+    if (questionIndex !== game.currentQuestion) {
+      return {
+        type: 'error',
+        recipient: 'ws',
+        targetWs: ws,
+        messageType: 'error',
+        data: { message: 'Invalid question index.' },
+      };
+    }
+
+    const question = game.questions[questionIndex];
+    if (!question) {
+      return {
+        type: 'error',
+        recipient: 'ws',
+        targetWs: ws,
+        messageType: 'error',
+        data: { message: 'Question not found.' },
+      };
+    }
+
+    if (typeof answerIndex !== 'number' || answerIndex < 0 || answerIndex > 3) {
+      return {
+        type: 'error',
+        recipient: 'ws',
+        targetWs: ws,
+        messageType: 'error',
+        data: { message: 'Invalid answer index.' },
+      };
+    }
+
+    const timestamp = Date.now() - (game.questionStartTime || Date.now());
+    game.playerAnswers.set(user.index, { answerIndex, timestamp });
+    console.log(`Answer received — player: ${user.name}, question: ${questionIndex}, answer: ${answerIndex}`);
+
+    return {
+      type: 'user',
+      recipient: 'ws',
+      targetWs: ws,
+      messageType: 'answer_accepted',
+      data: { questionIndex },
     };
   }
 
